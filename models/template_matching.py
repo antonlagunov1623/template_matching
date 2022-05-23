@@ -1,9 +1,9 @@
 from os import getcwd
 import argparse
-import math
 
 import cv2 as cv
 import numpy as np
+import imutils
 import matplotlib.pyplot as plt
 from matplotlib import image
 
@@ -23,132 +23,143 @@ def get_args():
 
     return parser.parse_args()
 
-def find_matches(template, image):
-    sift = cv.SIFT_create()
-    kp1, des1 = sift.detectAndCompute(template, None)
-    kp2, des2 = sift.detectAndCompute(image, None)
-    bf = cv.BFMatcher()
-    matches = bf.knnMatch(des1, des2, k=2)
-
+def find_similar(key_points, tepmlate_size, image_size):
     good = []
-    good_matches = []
-    for i, match in enumerate(matches):
-        if match[0].distance < 0.5 * match[1].distance:
-            good.append([match[0]])
-            good_matches.append(matches[i])
+    for i, kp in enumerate(key_points):
+        good_group = []
+        xS = 0
+        xE = 0
+        yS = 0
+        yE = 0
+        if kp[0] - tepmlate_size[0] < 0:
+            xS = 0
+        else:
+            xS = kp[0] - tepmlate_size[0]
+        if kp[0] + tepmlate_size[0] > image_size[0]:
+            xE = image_size[0]
+        else:
+            xE = kp[0] + tepmlate_size[0]
+        if kp[1] - tepmlate_size[1] < 0:
+            yS = 0
+        else:
+            yS = kp[1] - tepmlate_size[1]
+        if kp[1] + tepmlate_size[1] > image_size[1]:
+            yE = image_size[1]
+        else:
+            yE = kp[1] + tepmlate_size[1]
+        good_group.append(kp)
+        for j, p in enumerate(key_points[1:]):
+            if p[0] > xS and p[0] < xE and p[1] > yS and p[1] < yE:
+                good_group.append(p)
+        if len(good_group) >= 5:
+            good.append(good_group)
+    return good
 
-    return kp1, kp2, good, good_matches
-
-def find_best_matches_coordinates(template_name, screenshot_name):
+def find_matches(template_name, screenshot_name):
     template = cv.imread(f'{templates_directory}/{template_name}', 0)
     image = cv.imread(f'{screenshots_directory}/{screenshot_name}', 0)
 
-    kp1_1, kp2_1, good_1, good_matches_1 = find_matches(template, image)
-    kp1_2, kp2_2, good_2, good_matches_2 = find_matches(cv.bitwise_not(template), image)
-
-    kp1 = None
-    kp2 = None
-    good = None
-    good_matches = None
-    if len(good_1) == 0 and len(good_2) == 0:
-        kp1 = kp1_1
-        kp2 = kp2_1
-        good = good_1
-        good_matches = good_matches_1
-    elif len(good_1) == 0 and len(good_2) != 0:
-        kp1 = kp1_2
-        kp2 = kp2_2
-        good = good_2
-        good_matches = good_matches_2
-    else:
-        kp1 = kp1_1
-        kp2 = kp2_1
-        good = good_1
-        good_matches = good_matches_1
-
-    # np_result_image = cv.drawMatchesKnn(template, kp1, image, kp2, good, None, flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-    # result_image = Image.fromarray(np_result_image)
+    sift = cv.SIFT_create()
+    keypoints_1, descriptors_1 = sift.detectAndCompute(template, None)
+    keypoints_2, descriptors_2 = sift.detectAndCompute(image, None)
+    bf = cv.BFMatcher(cv.NORM_L1, crossCheck=True)
+    matches = bf.match(descriptors_1, descriptors_2)
+    matches = sorted(matches, key=lambda x: x.distance)
 
     key_points_list = []
-    for match in good_matches:
-        img_idx = match[0].trainIdx
-        (x2, y2) = kp2[img_idx].pt
+    for match in matches:
+        img_idx = match.trainIdx
+        (x2, y2) = keypoints_2[img_idx].pt
         key_points_list.append((int(x2), int(y2)))
+
+    key_points_list = find_similar(key_points_list, template.shape, image.shape)
+    # for group in key_points_list:
+    #     for point in group:
+    #         plt.plot(point[0], point[1], color='red', marker='v')
+    # plt.imshow(image)
+    # plt.show()
 
     return key_points_list
 
 def template_matching(template_name, screenshot_name):
-    main_img = cv.imread(f'{screenshots_directory}/{screenshot_name}')
-    gray_img = cv.cvtColor(main_img, cv.COLOR_BGR2GRAY)
+    bboxes = []
+    gray_bboxes = []
+    temp = None
+    template = cv.imread(f'{templates_directory}/{template_name}')
+    template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+    template = cv.Canny(template, 50, 200)
+    (tH, tW) = template.shape[:2]
 
-    template = cv.imread(f'{templates_directory}/{template_name}', 0)
-    template_edged = cv.Canny(template, 50, 200)
-    ht_t, wd_t = template_edged.shape
-    found = None
-
-    for scale in np.linspace(0.1, 1, 10)[::-1]:
-        resized = cv.resize(gray_img, dsize=(0, 0), fx=scale, fy=scale)
-        r = gray_img.shape[1] / float(resized.shape[1])
-
-        if resized.shape[0] < ht_t or resized.shape[1] < wd_t:
+    while True:
+        found = None
+        image = cv.imread(f'{screenshots_directory}/{screenshot_name}')
+        gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+        for box in bboxes:
+            for i in range(box[0][0], box[1][0]):
+                for j in range(box[0][1], box[1][1]):
+                    gray[j][i] = 0
+        for scale in np.linspace(0.2, 1.0, 20)[::-1]:
+            resized = imutils.resize(gray, width=int(gray.shape[1] * scale))
+            r = gray.shape[1] / float(resized.shape[1])
+            if resized.shape[0] < tH or resized.shape[1] < tW:
+                break
+            edged = cv.Canny(resized, 50, 200)
+            result = cv.matchTemplate(edged, template, cv.TM_CCOEFF_NORMED)
+            (_, maxVal, _, maxLoc) = cv.minMaxLoc(result)
+            if found is None or maxVal > found[0]:
+                found = (maxVal, maxLoc, r)
+        if found[0] > 0.5:
+            (_, maxLoc, r) = found
+            (startX, startY) = (int(maxLoc[0] * r), int(maxLoc[1] * r))
+            (endX, endY) = (int((maxLoc[0] + tW) * r), int((maxLoc[1] + tH) * r))
+            # cv.rectangle(image, (startX, startY), (endX, endY), (0, 0, 255), 2)
+            # plt.imshow(image), plt.show()
+            gray_bboxes.append(((maxLoc[0], maxLoc[1]), (maxLoc[0] + tW, maxLoc[1] + tH)))
+            bboxes.append(((startX, startY), (endX, endY)))
+        else:
             break
-        edged = cv.Canny(resized, 50, 200)
-        result = cv.matchTemplate(edged, template_edged, cv.TM_CCOEFF_NORMED)
-        (minVal, maxVal, minLoc, maxLoc) = cv.minMaxLoc(result)
-        if found is None or maxVal > found[0]:
-            found = (maxVal, maxLoc, r)
-
-    (_, maxLoc, r) = found
-    (startX, startY) = (int(maxLoc[0] * r), int(maxLoc[1] * r))
-    (endX, endY) = (int((maxLoc[0] + wd_t) * r), int((maxLoc[1] + ht_t) * r))
-    # figure = cv.rectangle(main_img, (startX, startY), (endX, endY), (255, 0, 0), 2)
-    # plt.imshow(main_img), plt.show()
-
-    return (startX, startY), (endX, endY)
-
+        if temp != None and temp - found[0] > 0.15:
+            bboxes.pop()
+            break
+        temp = found[0]
+    return bboxes
 
 if __name__ == '__main__':
     args = get_args()
-    # data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
-    # data = cv.imread(f'{screenshots_directory}/{args.screenshot_name}')
-    key_points_list = find_best_matches_coordinates(args.template_name, args.screenshot_name)
-    (startX, startY), (endX, endY) = template_matching(args.template_name, args.screenshot_name)
-    print(key_points_list)
+    key_points_list = find_matches(args.template_name, args.screenshot_name)
+    bboxes = template_matching(args.template_name, args.screenshot_name)
 
-    if len(key_points_list) > 0:
-        clear_list = []
-        for key_point in key_points_list:
-            if (key_point[0] >= startX and key_point[0] <= endX) and (key_point[1] >= startY and key_point[1] <= endY):
-                clear_list.append(key_point)
-        if len(clear_list) == 0 and len(key_points_list) < 10:
-            data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
-            figure = cv.rectangle(data, (startX, startY), (endX, endY), (255, 0, 0), 2)
-            plt.imshow(data)
-            plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
-            coordinate = (int((startX + endX) / 2), int((startY + endY) / 2))
-            with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
-                      'w') as f:
-                f.write(str(coordinate))
-                f.write('\n')
-        else:
-            data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
-            for point in clear_list:
-                plt.plot(point[0], point[1], color='red', marker='v')
-            plt.imshow(data)
-            plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
-
-            with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
-                      'w') as f:
-                for key_point in clear_list:
-                    f.write(str(key_point))
-                    f.write('\n')
-    else:
+    if len(key_points_list) > 0 and len(bboxes) == 0:
         data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
-        figure = cv.rectangle(data, (startX, startY), (endX, endY), (255, 0, 0), 2)
-        plt.imshow(data)
-        plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
-        coordinate = (int((startX+endX)/2), int((startY+endY)/2))
+        for group in key_points_list:
+            for point in group:
+                plt.plot(point[0], point[1], color='red', marker='v')
+                plt.imshow(data)
+                plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
         with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
                   'w') as f:
-            f.write(str(coordinate))
+            for group in key_points_list:
+                for kp in group:
+                    f.write(str(kp))
+                    f.write('\n')
+    elif len(key_points_list) >= 0 and len(bboxes) > 0:
+        data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
+        for bb in bboxes:
+            figure = cv.rectangle(data, bb[0], bb[1], (255, 0, 0), 2)
+        plt.imshow(data)
+        plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
+        coordinates = []
+        for bb in bboxes:
+            coordinates.append((int((bb[0][0] + bb[1][0]) / 2), int((bb[0][1] + bb[1][1]) / 2)))
+        with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
+                  'w') as f:
+            for kp in coordinates:
+                f.write(str(kp))
+                f.write('\n')
+    else:
+        data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
+        plt.imshow(data)
+        plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
+        with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
+                  'w') as f:
             f.write('\n')
