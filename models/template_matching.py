@@ -60,19 +60,35 @@ def find_matches(template_name, screenshot_name):
     image = cv.imread(f'{screenshots_directory}/{screenshot_name}', 0)
 
     sift = cv.SIFT_create()
-    keypoints_1, descriptors_1 = sift.detectAndCompute(template, None)
-    keypoints_2, descriptors_2 = sift.detectAndCompute(image, None)
-    bf = cv.BFMatcher(cv.NORM_L1, crossCheck=True)
-    matches = bf.match(descriptors_1, descriptors_2)
-    matches = sorted(matches, key=lambda x: x.distance)
+    kp1, des1 = sift.detectAndCompute(template, None)
+    kp2, des2 = sift.detectAndCompute(image, None)
+    FLANN_INDEX_KDTREE = 5
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict()  # or pass empty dictionary
+    flann = cv.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(des1, des2, k=2)
+    matchesMask = [[0, 0] for i in range(len(matches))]
+    good_matches = []
+    for i, (m, n) in enumerate(matches):
+        if m.distance < 0.5 * n.distance:
+            matchesMask[i] = [1, 0]
+            good_matches.append((m, n))
+
+    # draw_params = dict(matchColor=(0, 255, 0),
+    #                    singlePointColor=(255, 0, 0),
+    #                    matchesMask=matchesMask,
+    #                    flags=cv.DrawMatchesFlags_DEFAULT)
+    # img3 = cv.drawMatchesKnn(template, kp1, image, kp2, matches, None, **draw_params)
+    # plt.imshow(img3)
+    # plt.show()
 
     key_points_list = []
-    for match in matches:
-        img_idx = match.trainIdx
-        (x2, y2) = keypoints_2[img_idx].pt
+    for match in good_matches:
+        img_idx = match[0].trainIdx
+        (x2, y2) = kp2[img_idx].pt
         key_points_list.append((int(x2), int(y2)))
 
-    key_points_list = find_similar(key_points_list, template.shape, image.shape)
+    # key_points_list = find_similar(key_points_list, template.shape, image.shape)
     # for group in key_points_list:
     #     for point in group:
     #         plt.plot(point[0], point[1], color='red', marker='v')
@@ -118,10 +134,11 @@ def template_matching(template_name, screenshot_name):
             bboxes.append(((startX, startY), (endX, endY)))
         else:
             break
-        if temp != None and temp - found[0] > 0.15:
+        if temp != None and temp - found[0] > 0.09:
             bboxes.pop()
             break
         temp = found[0]
+        # print(found[0])
     return bboxes
 
 if __name__ == '__main__':
@@ -131,30 +148,25 @@ if __name__ == '__main__':
 
     if len(key_points_list) > 0 and len(bboxes) == 0:
         data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
-        for group in key_points_list:
-            for point in group:
-                plt.plot(point[0], point[1], color='red', marker='v')
-                plt.imshow(data)
-                plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
+        for point in key_points_list:
+            plt.plot(point[0], point[1], color='red', marker='v')
+            plt.imshow(data)
+            plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
         with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
                   'w') as f:
-            for group in key_points_list:
-                for kp in group:
-                    f.write(str(kp))
-                    f.write('\n')
+            for kp in key_points_list:
+                f.write(str(kp) + ' ')
+            f.write('\n')
     elif len(key_points_list) >= 0 and len(bboxes) > 0:
         data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
         for bb in bboxes:
             figure = cv.rectangle(data, bb[0], bb[1], (255, 0, 0), 2)
         plt.imshow(data)
         plt.savefig(f'{images_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.jpg')
-        coordinates = []
-        for bb in bboxes:
-            coordinates.append((int((bb[0][0] + bb[1][0]) / 2), int((bb[0][1] + bb[1][1]) / 2)))
         with open(f'{coordinates_results_directory}{args.template_name[:-4]}_{args.screenshot_name[:-4]}.txt',
                   'w') as f:
-            for kp in coordinates:
-                f.write(str(kp))
+            for bb in bboxes:
+                f.write(str((int((bb[0][0] + bb[1][0]) / 2), int((bb[0][1] + bb[1][1]) / 2))) + ' ')
                 f.write('\n')
     else:
         data = image.imread(f'{screenshots_directory}/{args.screenshot_name}')
