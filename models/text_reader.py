@@ -41,7 +41,7 @@ if __name__ == '__main__':
     result_image.save(f'{images_results_directory}{args.screenshot_name[:-4]}.jpg')
 
     with open(f'{text_and_coordinates_results_directory}{args.screenshot_name[:-4]}.txt', 'w') as f:
-        for box in boxes:
+        for box in sorted(boxes, key=lambda x: x[0][3][1]):
             f.write(str(box[0]))
             f.write('\n')
             f.write(box[1])

@@ -70,7 +70,7 @@ def find_matches(template_name, screenshot_name):
     matchesMask = [[0, 0] for i in range(len(matches))]
     good_matches = []
     for i, (m, n) in enumerate(matches):
-        if m.distance < 0.5 * n.distance:
+        if m.distance < 0.35 * n.distance:
             matchesMask[i] = [1, 0]
             good_matches.append((m, n))
 
@@ -89,9 +89,8 @@ def find_matches(template_name, screenshot_name):
         key_points_list.append((int(x2), int(y2)))
 
     # key_points_list = find_similar(key_points_list, template.shape, image.shape)
-    # for group in key_points_list:
-    #     for point in group:
-    #         plt.plot(point[0], point[1], color='red', marker='v')
+    # for point in key_points_list:
+    #     plt.plot(point[0], point[1], color='red', marker='v')
     # plt.imshow(image)
     # plt.show()
 
